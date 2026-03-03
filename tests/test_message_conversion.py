@@ -258,3 +258,46 @@ class TestMimicWXMessageParser:
     def test_parse_invalid_json_structure_returns_none(self):
         result = self.parser.parse_to_abm({"garbage": "data"})
         assert result is None
+
+    # --- nickname fallback (private chat) ---
+
+    def test_private_chat_nickname_uses_talker_display_name(self):
+        """talker_display_name is present and non-empty — use it directly."""
+        msg = {**PRIVATE_TEXT_MSG, "talker_display_name": "Alice Display", "chat_display_name": "Alice Chat"}
+        abm = self.parser.parse_to_abm(msg)
+        assert abm.sender.nickname == "Alice Display"
+
+    def test_private_chat_nickname_falls_back_to_chat_display_name(self):
+        """talker_display_name is empty string — fall back to chat_display_name."""
+        msg = {**PRIVATE_TEXT_MSG, "talker_display_name": "", "chat_display_name": "我要吃大汉堡"}
+        abm = self.parser.parse_to_abm(msg)
+        assert abm.sender.nickname == "我要吃大汉堡"
+
+    def test_private_chat_nickname_falls_back_to_wxid(self):
+        """Both display names are empty — fall back to talker wxid."""
+        msg = {**PRIVATE_TEXT_MSG, "talker_display_name": "", "chat_display_name": ""}
+        abm = self.parser.parse_to_abm(msg)
+        assert abm.sender.nickname == "wxid_alice"
+
+    def test_private_chat_nickname_missing_talker_display_name(self):
+        """talker_display_name key absent — fall back to chat_display_name."""
+        msg = {k: v for k, v in PRIVATE_TEXT_MSG.items() if k != "talker_display_name"}
+        msg["chat_display_name"] = "从联系人表"
+        abm = self.parser.parse_to_abm(msg)
+        assert abm.sender.nickname == "从联系人表"
+
+    # --- group chat nickname unaffected ---
+
+    def test_group_chat_sender_nickname_uses_talker_display_name(self):
+        """In group chats talker_display_name (member nickname) should still be used."""
+        msg = {**GROUP_TEXT_MSG, "talker_display_name": "Bob In Group", "chat_display_name": "Dev Group"}
+        abm = self.parser.parse_to_abm(msg)
+        assert abm.sender.nickname == "Bob In Group"
+        assert abm.group.group_name == "Dev Group"
+
+    def test_group_chat_sender_nickname_falls_back_to_wxid_not_group_name(self):
+        """If talker_display_name is empty in a group, fall back to wxid, not group name."""
+        msg = {**GROUP_TEXT_MSG, "talker_display_name": "", "chat_display_name": "Dev Group"}
+        abm = self.parser.parse_to_abm(msg)
+        assert abm.sender.nickname == "wxid_bob"
+        assert abm.group.group_name == "Dev Group"
