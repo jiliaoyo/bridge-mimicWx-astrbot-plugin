@@ -143,6 +143,20 @@ class MimicWXPlatformAdapter(Platform):
             logger.error("[MimicWX] 无法连接到 MimicWX 服务器: %s", exc)
             return
 
+        # Preload contact name mappings so outbound messages resolve correctly
+        # even before any inbound message has been received.
+        try:
+            contacts_resp = await self.client.get_contacts()
+            contacts_list = contacts_resp.get("contacts", [])
+            for c in contacts_list:
+                wxid = c.get("username", "")
+                name = c.get("display_name", "") or c.get("nick_name", "")
+                if wxid and name and name != wxid:
+                    self._session_to_name[wxid] = name
+            logger.info("[MimicWX] 预加载联系人映射: %d 条", len(self._session_to_name))
+        except Exception as exc:
+            logger.warning("[MimicWX] 预加载联系人失败（不影响运行）: %s", exc)
+
         self._running = True
         attempt = 0
 
@@ -245,9 +259,16 @@ class MimicWXPlatformAdapter(Platform):
                 self._session_to_name[session_id] = abm.group.group_name
         else:
             session_id = abm.sender.user_id
-            # Cache sender wxid → display name for outbound messages
-            if abm.sender.nickname and abm.sender.nickname != session_id:
-                self._session_to_name[session_id] = abm.sender.nickname
+            # Prefer chat_display_name (MimicWX DB contact table, more reliable)
+            # over sender.nickname which may be absent or equal to the wxid.
+            abm_raw = getattr(abm, "raw_message", {}) or {}
+            display = (
+                abm_raw.get("chat_display_name")
+                or abm.sender.nickname
+                or ""
+            )
+            if display and display != session_id:
+                self._session_to_name[session_id] = display
 
         event = MimicWXMessageEvent(
             message_str=abm.message_str,
@@ -275,13 +296,19 @@ class MimicWXPlatformAdapter(Platform):
         # WeChat UI (which shows names, not wxid identifiers).
         recipient: str = self._session_to_name.get(session_id, session_id)
 
+        logger.info(
+            "[MimicWX] send_by_session called: session=%s recipient=%s",
+            session_id,
+            recipient,
+        )
+
         # Collect text segments and image segments separately
         text_parts: list[str] = []
         image_segments: list = []
 
         for seg in message_chain.chain:
             if isinstance(seg, Comp.Plain):
-                if seg.text.strip():
+                if seg.text is not None:
                     text_parts.append(seg.text)
             elif isinstance(seg, Comp.Image):
                 image_segments.append(seg)
@@ -289,13 +316,14 @@ class MimicWXPlatformAdapter(Platform):
         # Send merged text first
         if text_parts:
             merged_text = "".join(text_parts)
-            try:
-                await self.client.send_text(to=recipient, text=merged_text)
-                logger.debug(
-                    "[MimicWX] 文本消息已发送 → %s: %.60s", recipient, merged_text
-                )
-            except (MimicWXClientError, ValueError) as exc:
-                logger.error("[MimicWX] 发送文本失败 → %s: %s", recipient, exc)
+            if merged_text:
+                try:
+                    await self.client.send_text(to=recipient, text=merged_text)
+                    logger.debug(
+                        "[MimicWX] 文本消息已发送 → %s: %.60s", recipient, merged_text
+                    )
+                except (MimicWXClientError, ValueError) as exc:
+                    logger.error("[MimicWX] 发送文本失败 → %s: %s", recipient, exc)
 
         # Send each image
         for img in image_segments:
