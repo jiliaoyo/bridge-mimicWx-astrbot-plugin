@@ -97,6 +97,9 @@ class MimicWXPlatformAdapter(Platform):
         self._parser = MimicWXMessageParser(bot_self_id="")
         self._running = False
         self._ws: aiohttp.ClientWebSocketResponse | None = None
+        # Maps session wxid → display name so outbound messages use names
+        # that MimicWX can locate in the WeChat UI.
+        self._session_to_name: dict[str, str] = {}
 
     # ------------------------------------------------------------------
     # Platform abstract methods
@@ -237,8 +240,14 @@ class MimicWXPlatformAdapter(Platform):
         # Build session_id: group chats use group_id; private uses sender id
         if abm.group:
             session_id = abm.group.group_id
+            # Cache group wxid → display name for outbound messages
+            if abm.group.group_name and abm.group.group_name != session_id:
+                self._session_to_name[session_id] = abm.group.group_name
         else:
             session_id = abm.sender.user_id
+            # Cache sender wxid → display name for outbound messages
+            if abm.sender.nickname and abm.sender.nickname != session_id:
+                self._session_to_name[session_id] = abm.sender.nickname
 
         event = MimicWXMessageEvent(
             message_str=abm.message_str,
@@ -262,6 +271,9 @@ class MimicWXPlatformAdapter(Platform):
     async def send_by_session(self, session, message_chain) -> None:
         """Send *message_chain* to the WeChat contact identified by *session*."""
         session_id: str = session.session_id
+        # Resolve to display name so MimicWX can locate the contact in the
+        # WeChat UI (which shows names, not wxid identifiers).
+        recipient: str = self._session_to_name.get(session_id, session_id)
 
         # Collect text segments and image segments separately
         text_parts: list[str] = []
@@ -278,12 +290,12 @@ class MimicWXPlatformAdapter(Platform):
         if text_parts:
             merged_text = "".join(text_parts)
             try:
-                await self.client.send_text(to=session_id, text=merged_text)
+                await self.client.send_text(to=recipient, text=merged_text)
                 logger.debug(
-                    "[MimicWX] 文本消息已发送 → %s: %.60s", session_id, merged_text
+                    "[MimicWX] 文本消息已发送 → %s: %.60s", recipient, merged_text
                 )
             except (MimicWXClientError, ValueError) as exc:
-                logger.error("[MimicWX] 发送文本失败 → %s: %s", session_id, exc)
+                logger.error("[MimicWX] 发送文本失败 → %s: %s", recipient, exc)
 
         # Send each image
         for img in image_segments:
@@ -294,12 +306,12 @@ class MimicWXPlatformAdapter(Platform):
                 if filename and "/" in filename:
                     filename = filename.rsplit("/", 1)[-1]
                 await self.client.send_image(
-                    to=session_id,
+                    to=recipient,
                     image_b64=b64,
                     name=filename or "image.png",
                 )
-                logger.debug("[MimicWX] 图片已发送 → %s", session_id)
+                logger.debug("[MimicWX] 图片已发送 → %s", recipient)
             except (MimicWXClientError, ValueError) as exc:
-                logger.error("[MimicWX] 发送图片失败 → %s: %s", session_id, exc)
+                logger.error("[MimicWX] 发送图片失败 → %s: %s", recipient, exc)
 
         await super().send_by_session(session, message_chain)

@@ -234,6 +234,134 @@ class TestSendBySession:
 
 
 # ---------------------------------------------------------------------------
+# Display name resolution (wxid → name for MimicWX UI)
+# ---------------------------------------------------------------------------
+
+
+class TestDisplayNameResolution:
+    """Verify that outbound messages use cached display names instead of wxids."""
+
+    @pytest.mark.asyncio
+    async def test_private_chat_uses_display_name(self):
+        """After receiving a private message, replies should use the display name."""
+        event_queue = asyncio.Queue()
+        adapter = MimicWXPlatformAdapter(VALID_CONFIG.copy(), {}, event_queue)
+        adapter.client_self_id = "wxid_bot"
+
+        # Simulate receiving a private message from Alice
+        raw = {
+            "local_id": 10,
+            "server_id": 100,
+            "create_time": 1700000000,
+            "content": "Hello",
+            "parsed": {"type": "Text", "data": {"text": "Hello"}},
+            "msg_type": 1,
+            "talker": "wxid_alice",
+            "talker_display_name": "Alice",
+            "chat": "wxid_alice",
+            "chat_display_name": "Alice",
+            "is_self": False,
+        }
+        await adapter._dispatch_message(raw)
+
+        # Now send a reply — should use "Alice" not "wxid_alice"
+        mock_client = AsyncMock()
+        mock_client.send_text = AsyncMock(
+            return_value={"sent": True, "verified": True, "message": "ok"}
+        )
+        adapter.client = mock_client
+
+        session = _FakeSession(session_id="wxid_alice", message_type="FriendMessage")
+        chain = _FakeMessageChain([Comp.Plain(text="Hi Alice!")])
+
+        await adapter.send_by_session(session, chain)
+        mock_client.send_text.assert_called_once_with(
+            to="Alice", text="Hi Alice!"
+        )
+
+    @pytest.mark.asyncio
+    async def test_group_chat_uses_display_name(self):
+        """After receiving a group message, replies should use the group display name."""
+        event_queue = asyncio.Queue()
+        adapter = MimicWXPlatformAdapter(VALID_CONFIG.copy(), {}, event_queue)
+        adapter.client_self_id = "wxid_bot"
+
+        # Simulate receiving a group message
+        raw = {
+            "local_id": 11,
+            "server_id": 101,
+            "create_time": 1700000001,
+            "content": "Hello group",
+            "parsed": {"type": "Text", "data": {"text": "Hello group"}},
+            "msg_type": 1,
+            "talker": "wxid_bob",
+            "talker_display_name": "Bob",
+            "chat": "12345@chatroom",
+            "chat_display_name": "My Group",
+            "is_self": False,
+        }
+        await adapter._dispatch_message(raw)
+
+        # Now send a reply to the group — should use "My Group"
+        mock_client = AsyncMock()
+        mock_client.send_text = AsyncMock(
+            return_value={"sent": True, "verified": True, "message": "ok"}
+        )
+        adapter.client = mock_client
+
+        session = _FakeSession(session_id="12345@chatroom", message_type="GroupMessage")
+        chain = _FakeMessageChain([Comp.Plain(text="Hello everyone!")])
+
+        await adapter.send_by_session(session, chain)
+        mock_client.send_text.assert_called_once_with(
+            to="My Group", text="Hello everyone!"
+        )
+
+    @pytest.mark.asyncio
+    async def test_fallback_to_session_id_when_no_display_name(self):
+        """When no display name is cached, fall back to the raw session_id."""
+        event_queue = asyncio.Queue()
+        adapter = MimicWXPlatformAdapter(VALID_CONFIG.copy(), {}, event_queue)
+
+        mock_client = AsyncMock()
+        mock_client.send_text = AsyncMock(
+            return_value={"sent": True, "verified": True, "message": "ok"}
+        )
+        adapter.client = mock_client
+
+        session = _FakeSession(session_id="wxid_unknown", message_type="FriendMessage")
+        chain = _FakeMessageChain([Comp.Plain(text="Hello")])
+
+        await adapter.send_by_session(session, chain)
+        mock_client.send_text.assert_called_once_with(
+            to="wxid_unknown", text="Hello"
+        )
+
+    @pytest.mark.asyncio
+    async def test_display_name_not_cached_when_same_as_wxid(self):
+        """When display name equals the wxid, no mapping is cached."""
+        event_queue = asyncio.Queue()
+        adapter = MimicWXPlatformAdapter(VALID_CONFIG.copy(), {}, event_queue)
+        adapter.client_self_id = "wxid_bot"
+
+        raw = {
+            "local_id": 12,
+            "server_id": 102,
+            "create_time": 1700000002,
+            "content": "Hi",
+            "parsed": {"type": "Text", "data": {"text": "Hi"}},
+            "msg_type": 1,
+            "talker": "wxid_noname",
+            "talker_display_name": "wxid_noname",
+            "chat": "wxid_noname",
+            "chat_display_name": "wxid_noname",
+            "is_self": False,
+        }
+        await adapter._dispatch_message(raw)
+        assert "wxid_noname" not in adapter._session_to_name
+
+
+# ---------------------------------------------------------------------------
 # Adapter termination
 # ---------------------------------------------------------------------------
 
