@@ -61,14 +61,19 @@ class MimicWXBridgePlugin(Star):
         host = self.config.get("mimicwx_host", "localhost")
         port = self.config.get("mimicwx_port", 8899)
         token = self.config.get("mimicwx_token", "")
+        reconnect_interval = self.config.get("mimicwx_reconnect_interval", 5)
+        max_reconnect = self.config.get("mimicwx_max_reconnect_attempts", 0)
 
         logger.info(
             "[MimicWX Bridge] 插件已加载 — 'mimicwx' 平台适配器已注册。"
-            "当前插件配置: host=%s, port=%s, token=%s。"
+            "当前插件配置: host=%s, port=%s, token=%s, "
+            "reconnect_interval=%ss, max_reconnect=%s。"
             "请在 AstrBot 平台配置中添加 type: mimicwx 的平台条目以开始使用。",
             host,
             port,
             "***" if token else "未设置",
+            reconnect_interval,
+            max_reconnect if max_reconnect > 0 else "无限",
         )
 
     async def terminate(self) -> None:
