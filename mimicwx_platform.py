@@ -290,28 +290,6 @@ class MimicWXPlatformAdapter(Platform):
     # Sending
     # ------------------------------------------------------------------
 
-    async def _send_text_with_retry(self, recipient: str, text: str) -> None:
-        """Send text once; retry once when server reports verified=false."""
-        result = await self.client.send_text(to=recipient, text=text)
-        verified = result.get("verified", True) if isinstance(result, dict) else True
-        if verified is not False:
-            return
-
-        logger.warning("[MimicWX] 文本发送未验证，重试一次 → %s", recipient)
-        try:
-            await self.client.chat_with(who=recipient)
-        except (MimicWXClientError, ValueError) as exc:
-            logger.warning("[MimicWX] 重试前切换会话失败 → %s: %s", recipient, exc)
-
-        retry_result = await self.client.send_text(to=recipient, text=text)
-        retry_verified = (
-            retry_result.get("verified", True)
-            if isinstance(retry_result, dict)
-            else True
-        )
-        if retry_verified is False:
-            logger.warning("[MimicWX] 文本重试后仍未验证 → %s", recipient)
-
     async def send_by_session(self, session, message_chain) -> None:
         """Send *message_chain* to the WeChat contact identified by *session*."""
         session_id: str = session.session_id
@@ -347,7 +325,7 @@ class MimicWXPlatformAdapter(Platform):
             merged_text = "".join(text_parts)
             if merged_text:
                 try:
-                    await self._send_text_with_retry(recipient, merged_text)
+                    await self.client.send_text(to=recipient, text=merged_text)
                     logger.debug(
                         "[MimicWX] 文本消息已发送 → %s: %.60s", recipient, merged_text
                     )

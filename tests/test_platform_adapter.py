@@ -256,30 +256,6 @@ class TestSendBySession:
         mock_client.send_text.assert_called_once_with(to="wxid_alice", text="hello")
         mock_client.send_image.assert_not_called()
 
-    @pytest.mark.asyncio
-    async def test_send_text_retries_once_when_unverified(self):
-        event_queue = asyncio.Queue()
-        adapter = MimicWXPlatformAdapter(VALID_CONFIG.copy(), {}, event_queue)
-        adapter.client_self_id = "wxid_bot"
-
-        mock_client = AsyncMock()
-        mock_client.send_text = AsyncMock(
-            side_effect=[
-                {"sent": True, "verified": False, "message": "ok"},
-                {"sent": True, "verified": True, "message": "ok"},
-            ]
-        )
-        mock_client.chat_with = AsyncMock(return_value={"success": True})
-        adapter.client = mock_client
-
-        session = _FakeSession(session_id="wxid_alice", message_type="FriendMessage")
-        chain = _FakeMessageChain([Comp.Plain(text="retry me")])
-
-        await adapter.send_by_session(session, chain)
-
-        assert mock_client.send_text.call_count == 2
-        mock_client.chat_with.assert_called_once_with(who="wxid_alice")
-
 
 # ---------------------------------------------------------------------------
 # MimicWXMessageEvent.send (text + image via event)
@@ -443,24 +419,6 @@ class TestDisplayNameResolution:
 
         mock_client.send_text.assert_called_once_with(to="wxid_alice", text="hello")
         mock_client.send_image.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_event_send_text_retries_once_when_unverified(self):
-        mock_client = AsyncMock()
-        mock_client.send_text = AsyncMock(
-            side_effect=[
-                {"sent": True, "verified": False, "message": "ok"},
-                {"sent": True, "verified": True, "message": "ok"},
-            ]
-        )
-        mock_client.chat_with = AsyncMock(return_value={"success": True})
-        event, _ = _make_event(session_id="wxid_alice", mock_client=mock_client)
-
-        chain = MessageChain([Comp.Plain(text="retry me too")])
-        await event.send(chain)
-
-        assert mock_client.send_text.call_count == 2
-        mock_client.chat_with.assert_called_once_with(who="wxid_alice")
 
     @pytest.mark.asyncio
     async def test_send_uses_configured_host(self):
