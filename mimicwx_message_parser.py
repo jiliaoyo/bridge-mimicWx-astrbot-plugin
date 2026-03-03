@@ -7,7 +7,6 @@ into AstrBot AstrBotMessage objects ready for the event queue.
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any
 
 logger = logging.getLogger("astrbot")
@@ -98,17 +97,83 @@ def _app_type_label(app_type: int | None, title: str) -> str:
     return "链接"
 
 
-def _is_local_readable_file(path: Any) -> bool:
-    """Return True when *path* is an existing local file path."""
-    if not isinstance(path, str):
-        return False
-    candidate = path.strip()
-    if not candidate:
-        return False
+def _normalize_msg_type(raw_msg_type: Any) -> int:
+    """Extract base message type from raw/packed values."""
     try:
-        return os.path.isfile(candidate)
-    except OSError:
-        return False
+        msg_type = int(raw_msg_type)
+    except (TypeError, ValueError):
+        return 0
+    if msg_type > 0xFFFF:
+        return msg_type & 0xFFFF
+    return msg_type
+
+
+def _resolve_talker(raw: dict[str, Any]) -> str:
+    """Resolve sender wxid from possible field aliases."""
+    for key in ("talker", "sender", "from_user", "from_user_name"):
+        value = raw.get(key, "")
+        if isinstance(value, str) and value:
+            return value
+    return ""
+
+
+def _resolve_chat(raw: dict[str, Any]) -> str:
+    """Resolve chat/session id from possible field aliases."""
+    for key in ("chat", "user_name", "room_id"):
+        value = raw.get(key, "")
+        if isinstance(value, str) and value:
+            return value
+    return ""
+
+
+def _normalize_sender_and_chat(raw: dict[str, Any]) -> tuple[str, str]:
+    """Return normalized (talker, chat) for private/group messages."""
+    talker = _resolve_talker(raw)
+    chat = _resolve_chat(raw)
+
+    # Some payloads may place group-id in talker and sender-id in chat.
+    if is_group_chat(talker) and not is_group_chat(chat):
+        possible_sender = _resolve_talker(
+            {
+                "talker": raw.get("sender", ""),
+                "sender": raw.get("from_user", ""),
+                "from_user": raw.get("from_user_name", ""),
+            }
+        )
+        if possible_sender:
+            chat = talker
+            talker = possible_sender
+
+    return talker, chat
+
+
+def _normalize_incoming_raw(raw: dict[str, Any]) -> dict[str, Any]:
+    """Normalize incoming MimicWX payload keys to stable canonical fields."""
+    normalized = dict(raw)
+
+    talker, chat = _normalize_sender_and_chat(raw)
+    if talker:
+        normalized["talker"] = talker
+    if chat:
+        normalized["chat"] = chat
+
+    normalized["msg_type"] = _normalize_msg_type(raw.get("msg_type", 0))
+
+    if not normalized.get("talker_display_name"):
+        normalized["talker_display_name"] = (
+            raw.get("talker_display")
+            or raw.get("sender_display")
+            or raw.get("sender_display_name")
+            or ""
+        )
+    if not normalized.get("chat_display_name"):
+        normalized["chat_display_name"] = (
+            raw.get("chat_display")
+            or raw.get("room_display_name")
+            or ""
+        )
+
+    return normalized
 
 
 # ---------------------------------------------------------------------------
@@ -141,15 +206,21 @@ class MimicWXMessageParser:
         - They are system messages (``msg_type`` 10000 / 10002).
         - They have no talker (anonymous / internal notifications).
         """
+        raw = _normalize_incoming_raw(raw)
+
+        event_type = raw.get("type")
+        if event_type and event_type not in ("db_message", "sent"):
+            return False
+
         # Sent-confirmation events broadcast by MimicWX after we POST /send
-        if raw.get("type") == "sent":
+        if event_type == "sent":
             return False
 
         is_self = raw.get("is_self", False)
         if is_self:
             return False
 
-        talker = raw.get("talker", "")
+        talker, _chat = _normalize_sender_and_chat(raw)
         if not talker:
             return False
 
@@ -167,11 +238,13 @@ class MimicWXMessageParser:
             should not be processed (filtered by :meth:`should_process`
             or structurally invalid).
         """
+        raw = _normalize_incoming_raw(raw)
+
         if not self.should_process(raw):
             return None
 
         # Require at minimum a chat field to build a session
-        chat = raw.get("chat", "")
+        _talker, chat = _normalize_sender_and_chat(raw)
         if not chat:
             logger.debug("[MimicWX] Dropping message with empty chat field")
             return None
@@ -201,8 +274,7 @@ class MimicWXMessageParser:
         abm.message_id = str(raw.get("local_id", ""))
         abm.timestamp = int(raw.get("create_time", 0))
 
-        talker = raw.get("talker", "")
-        chat = raw.get("chat", "")
+        talker, chat = _normalize_sender_and_chat(raw)
         talker_display = raw.get("talker_display_name", "")
         chat_display = raw.get("chat_display_name", "")
 
@@ -241,14 +313,9 @@ class MimicWXMessageParser:
             if text:
                 components.append(Comp.Plain(text=text))
         elif msg_type_str == "Image":
-            path = data.get("path")
-            if _is_local_readable_file(path):
-                components.append(Comp.Image(file=path))
-            else:
-                logger.warning(
-                    "[MimicWX] 丢弃图片消息：无可读本地文件 path=%r", path
-                )
-                return None
+            # Align with MimicWX.js adapter: inbound images are represented
+            # as a plain placeholder to avoid invalid local-file errors.
+            components.append(Comp.Plain(text="[图片]"))
         else:
             # For all other types use plain text representation
             if text_content:

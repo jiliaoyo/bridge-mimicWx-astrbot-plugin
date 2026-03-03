@@ -6,7 +6,6 @@ AstrBotMessage objects with correct fields.
 
 import sys
 import os
-import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -198,6 +197,10 @@ class TestMimicWXMessageParser:
     def test_should_process_text_message(self):
         assert self.parser.should_process(PRIVATE_TEXT_MSG) is True
 
+    def test_should_process_db_message_event(self):
+        msg = {**PRIVATE_TEXT_MSG, "type": "db_message"}
+        assert self.parser.should_process(msg) is True
+
     def test_should_not_process_self_message(self):
         assert self.parser.should_process(SELF_MSG) is False
 
@@ -209,6 +212,14 @@ class TestMimicWXMessageParser:
 
     def test_should_not_process_missing_talker(self):
         msg = {**PRIVATE_TEXT_MSG, "talker": ""}
+        assert self.parser.should_process(msg) is False
+
+    def test_should_not_process_packed_system_msg_type(self):
+        packed_system = {**PRIVATE_TEXT_MSG, "msg_type": (12345 << 16) | 10000}
+        assert self.parser.should_process(packed_system) is False
+
+    def test_should_not_process_unknown_event_type(self):
+        msg = {**PRIVATE_TEXT_MSG, "type": "heartbeat"}
         assert self.parser.should_process(msg) is False
 
     # --- parse_to_abm ---
@@ -231,12 +242,49 @@ class TestMimicWXMessageParser:
         assert abm.group.group_id == "12345678@chatroom"
         assert abm.group.group_name == "Dev Group"
 
+    def test_parse_group_with_user_name_field(self):
+        msg = {
+            **GROUP_TEXT_MSG,
+            "chat": "",
+            "user_name": "12345678@chatroom",
+        }
+        abm = self.parser.parse_to_abm(msg)
+        assert abm is not None
+        assert abm.group is not None
+        assert abm.group.group_id == "12345678@chatroom"
+
+    def test_parse_group_with_display_alias_fields(self):
+        msg = {
+            **GROUP_TEXT_MSG,
+            "talker_display_name": "",
+            "chat_display_name": "",
+            "talker_display": "Bob Alias",
+            "chat_display": "Dev Group Alias",
+        }
+        abm = self.parser.parse_to_abm(msg)
+        assert abm is not None
+        assert abm.sender.nickname == "Bob Alias"
+        assert abm.group is not None
+        assert abm.group.group_name == "Dev Group Alias"
+
+    def test_parse_private_with_display_alias_fields(self):
+        msg = {
+            **PRIVATE_TEXT_MSG,
+            "talker_display_name": "",
+            "chat_display_name": "",
+            "talker_display": "Alice Alias",
+            "chat_display": "Alice Chat Alias",
+        }
+        abm = self.parser.parse_to_abm(msg)
+        assert abm is not None
+        assert abm.sender.nickname == "Alice Alias"
+
     def test_parse_image_message(self):
         abm = self.parser.parse_to_abm(IMAGE_MSG)
         assert abm is not None
         assert "[图片]" in abm.message_str
 
-    def test_parse_image_with_invalid_path_returns_none(self):
+    def test_parse_image_with_invalid_path_falls_back_to_plain(self):
         msg = {
             **IMAGE_MSG,
             "parsed": {
@@ -247,18 +295,21 @@ class TestMimicWXMessageParser:
             },
         }
         abm = self.parser.parse_to_abm(msg)
-        assert abm is None
+        assert abm is not None
+        assert len(abm.message) == 1
+        assert isinstance(abm.message[0], Comp.Plain)
+        assert abm.message[0].text == "[图片]"
 
-    def test_parse_image_with_existing_file_keeps_image_component(self):
-        with tempfile.NamedTemporaryFile(suffix=".jpg") as fp:
-            msg = {
-                **IMAGE_MSG,
-                "parsed": {"type": "Image", "data": {"path": fp.name}},
-            }
-            abm = self.parser.parse_to_abm(msg)
-            assert abm is not None
-            assert len(abm.message) == 1
-            assert isinstance(abm.message[0], Comp.Image)
+    def test_parse_image_with_existing_file_still_uses_plain_placeholder(self):
+        msg = {
+            **IMAGE_MSG,
+            "parsed": {"type": "Image", "data": {"path": "/tmp/existing.jpg"}},
+        }
+        abm = self.parser.parse_to_abm(msg)
+        assert abm is not None
+        assert len(abm.message) == 1
+        assert isinstance(abm.message[0], Comp.Plain)
+        assert abm.message[0].text == "[图片]"
 
     def test_parse_returns_none_for_self(self):
         result = self.parser.parse_to_abm(SELF_MSG)

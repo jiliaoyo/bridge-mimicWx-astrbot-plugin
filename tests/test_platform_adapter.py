@@ -605,6 +605,30 @@ class TestDispatchMessageDisplayName:
         await adapter._dispatch_message(raw)
         assert adapter._session_to_name.get("wxid_dave") == "Dave"
 
+    @pytest.mark.asyncio
+    async def test_ws_alias_display_fields_are_accepted(self):
+        """MimicWX WS uses chat_display/talker_display aliases."""
+        event_queue = asyncio.Queue()
+        adapter = MimicWXPlatformAdapter(VALID_CONFIG.copy(), {}, event_queue)
+        adapter.client_self_id = "wxid_bot"
+
+        raw = {
+            "type": "db_message",
+            "local_id": 22,
+            "server_id": 202,
+            "create_time": 1700000012,
+            "content": "Hello",
+            "parsed": {"type": "Text", "data": {"text": "Hello"}},
+            "msg_type": 1,
+            "talker": "wxid_eve",
+            "talker_display": "Eve Alias",
+            "chat": "wxid_eve",
+            "chat_display": "Eve Chat Alias",
+            "is_self": False,
+        }
+        await adapter._dispatch_message(raw)
+        assert adapter._session_to_name.get("wxid_eve") == "Eve Chat Alias"
+
 
 # ---------------------------------------------------------------------------
 # run(): contact preloading
