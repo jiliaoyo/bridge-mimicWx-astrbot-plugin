@@ -7,6 +7,7 @@ into AstrBot AstrBotMessage objects ready for the event queue.
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 logger = logging.getLogger("astrbot")
@@ -97,6 +98,19 @@ def _app_type_label(app_type: int | None, title: str) -> str:
     return "链接"
 
 
+def _is_local_readable_file(path: Any) -> bool:
+    """Return True when *path* is an existing local file path."""
+    if not isinstance(path, str):
+        return False
+    candidate = path.strip()
+    if not candidate:
+        return False
+    try:
+        return os.path.isfile(candidate)
+    except OSError:
+        return False
+
+
 # ---------------------------------------------------------------------------
 # MimicWXMessageParser
 # ---------------------------------------------------------------------------
@@ -163,7 +177,10 @@ class MimicWXMessageParser:
             return None
 
         try:
-            return self._build_abm(raw)
+            abm = self._build_abm(raw)
+            if abm is None:
+                return None
+            return abm
         except Exception as exc:
             logger.warning("[MimicWX] Failed to parse message: %s | raw=%s", exc, raw)
             return None
@@ -225,10 +242,13 @@ class MimicWXMessageParser:
                 components.append(Comp.Plain(text=text))
         elif msg_type_str == "Image":
             path = data.get("path")
-            if path:
+            if _is_local_readable_file(path):
                 components.append(Comp.Image(file=path))
             else:
-                components.append(Comp.Plain(text="[图片]"))
+                logger.warning(
+                    "[MimicWX] 丢弃图片消息：无可读本地文件 path=%r", path
+                )
+                return None
         else:
             # For all other types use plain text representation
             if text_content:

@@ -234,6 +234,28 @@ class TestSendBySession:
         mock_client.send_text.assert_not_called()
         mock_client.send_image.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_send_ignores_unsupported_segment(self):
+        event_queue = asyncio.Queue()
+        adapter = MimicWXPlatformAdapter(VALID_CONFIG.copy(), {}, event_queue)
+        adapter.client_self_id = "wxid_bot"
+
+        mock_client = AsyncMock()
+        mock_client.send_text = AsyncMock(return_value={"sent": True})
+        mock_client.send_image = AsyncMock(return_value={"sent": True})
+        adapter.client = mock_client
+
+        class _UnsupportedSeg:
+            pass
+
+        session = _FakeSession(session_id="wxid_alice", message_type="FriendMessage")
+        chain = _FakeMessageChain([Comp.Plain(text="hello"), _UnsupportedSeg()])
+
+        await adapter.send_by_session(session, chain)
+
+        mock_client.send_text.assert_called_once_with(to="wxid_alice", text="hello")
+        mock_client.send_image.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # MimicWXMessageEvent.send (text + image via event)
@@ -376,6 +398,27 @@ class TestDisplayNameResolution:
             await event.send(chain)
 
         assert mock_client.send_image.called
+
+    @pytest.mark.asyncio
+    async def test_send_ignores_unsupported_segment_via_event(self):
+        """event.send() should ignore unsupported segments without file errors."""
+        mock_client = AsyncMock()
+        mock_client.send_text = AsyncMock(
+            return_value={"sent": True, "verified": True, "message": "ok"}
+        )
+        mock_client.send_image = AsyncMock(
+            return_value={"sent": True, "verified": False, "message": "ok"}
+        )
+        event, _ = _make_event(session_id="wxid_alice", mock_client=mock_client)
+
+        class _UnsupportedSeg:
+            pass
+
+        chain = _FakeMessageChain([Comp.Plain(text="hello"), _UnsupportedSeg()])
+        await event.send(chain)
+
+        mock_client.send_text.assert_called_once_with(to="wxid_alice", text="hello")
+        mock_client.send_image.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_send_uses_configured_host(self):

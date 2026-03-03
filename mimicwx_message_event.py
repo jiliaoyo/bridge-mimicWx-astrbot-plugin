@@ -46,6 +46,10 @@ class MimicWXMessageEvent(AstrMessageEvent):
                     text_parts.append(seg.text)
             elif isinstance(seg, Comp.Image):
                 image_segments.append(seg)
+            else:
+                logger.debug(
+                    "[MimicWX] 忽略不支持的消息段类型: %s", type(seg).__name__
+                )
 
         if text_parts:
             merged_text = "".join(text_parts)

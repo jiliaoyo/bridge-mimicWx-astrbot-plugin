@@ -6,10 +6,12 @@ AstrBotMessage objects with correct fields.
 
 import sys
 import os
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
+import astrbot.api.message_components as Comp
 from mimicwx_message_parser import (
     MimicWXMessageParser,
     is_group_chat,
@@ -233,6 +235,30 @@ class TestMimicWXMessageParser:
         abm = self.parser.parse_to_abm(IMAGE_MSG)
         assert abm is not None
         assert "[图片]" in abm.message_str
+
+    def test_parse_image_with_invalid_path_returns_none(self):
+        msg = {
+            **IMAGE_MSG,
+            "parsed": {
+                "type": "Image",
+                "data": {
+                    "path": "3057020100044b3049020100020464edd7cb02032dd0e9"
+                },
+            },
+        }
+        abm = self.parser.parse_to_abm(msg)
+        assert abm is None
+
+    def test_parse_image_with_existing_file_keeps_image_component(self):
+        with tempfile.NamedTemporaryFile(suffix=".jpg") as fp:
+            msg = {
+                **IMAGE_MSG,
+                "parsed": {"type": "Image", "data": {"path": fp.name}},
+            }
+            abm = self.parser.parse_to_abm(msg)
+            assert abm is not None
+            assert len(abm.message) == 1
+            assert isinstance(abm.message[0], Comp.Image)
 
     def test_parse_returns_none_for_self(self):
         result = self.parser.parse_to_abm(SELF_MSG)
