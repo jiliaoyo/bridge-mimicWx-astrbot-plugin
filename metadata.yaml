@@ -1,0 +1,5 @@
+name: bridge-mimicWx-astrbot-plugin
+author: jiliaoyo
+desc: MimicWX-Linux 与 AstrBot 之间的桥梁插件，将微信消息（通过 MimicWX-Linux REST/WebSocket API）接入 AstrBot 的 LLM/插件流水线
+version: 1.0.0
+repo: https://github.com/jiliaoyo/bridge-mimicWx-astrbot-plugin

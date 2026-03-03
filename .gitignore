@@ -1,0 +1,18 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+
+# Pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# AstrBot runtime data (generated at runtime — not for version control)
+data/
+
+# Virtual environments
+.venv/
+venv/
+env/
