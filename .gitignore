@@ -9,7 +9,7 @@ __pycache__/
 .coverage
 .idea/
 htmlcov/
-
+ghcr_token.txt
 # AstrBot runtime data (generated at runtime — not for version control)
 data/
 
