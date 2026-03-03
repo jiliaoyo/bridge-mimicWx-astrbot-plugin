@@ -1,0 +1,32 @@
+{
+  "mimicwx_host": {
+    "description": "MimicWX 服务器地址",
+    "type": "string",
+    "hint": "MimicWX-Linux 运行的主机名或 IP 地址",
+    "default": "localhost"
+  },
+  "mimicwx_port": {
+    "description": "MimicWX 服务器端口",
+    "type": "int",
+    "hint": "MimicWX-Linux REST/WebSocket API 端口，默认 8899",
+    "default": 8899
+  },
+  "mimicwx_token": {
+    "description": "API 认证 Token",
+    "type": "string",
+    "hint": "与 MimicWX-Linux config.toml 中的 token 一致；不启用认证则留空",
+    "default": ""
+  },
+  "mimicwx_reconnect_interval": {
+    "description": "断线重连间隔（秒）",
+    "type": "int",
+    "hint": "WebSocket 断线后等待重连的时间间隔，单位为秒",
+    "default": 5
+  },
+  "mimicwx_max_reconnect_attempts": {
+    "description": "最大重连次数",
+    "type": "int",
+    "hint": "WebSocket 最大重连尝试次数，0 表示无限重连",
+    "default": 0
+  }
+}

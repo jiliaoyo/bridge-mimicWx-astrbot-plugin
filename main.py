@@ -53,13 +53,22 @@ class MimicWXBridgePlugin(Star):
 
     def __init__(self, context: Context, config: dict | None = None) -> None:
         super().__init__(context, config)
+        self.config = config or {}
 
     async def initialize(self) -> None:
         from astrbot.api import logger
 
+        host = self.config.get("mimicwx_host", "localhost")
+        port = self.config.get("mimicwx_port", 8899)
+        token = self.config.get("mimicwx_token", "")
+
         logger.info(
             "[MimicWX Bridge] 插件已加载 — 'mimicwx' 平台适配器已注册。"
-            "请在 AstrBot 平台配置中添加 type: mimicwx 的平台条目以开始使用。"
+            "当前插件配置: host=%s, port=%s, token=%s。"
+            "请在 AstrBot 平台配置中添加 type: mimicwx 的平台条目以开始使用。",
+            host,
+            port,
+            "***" if token else "未设置",
         )
 
     async def terminate(self) -> None:
