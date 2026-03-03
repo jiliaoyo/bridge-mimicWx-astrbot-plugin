@@ -54,6 +54,8 @@ VALID_CONFIG = {
 
 from mimicwx_platform import MimicWXPlatformAdapter  # noqa: E402
 from mimicwx_message_parser import MimicWXMessageParser  # noqa: E402
+from mimicwx_message_event import MimicWXMessageEvent  # noqa: E402
+from astrbot.api.event import MessageChain  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -236,9 +238,6 @@ class TestSendBySession:
 # ---------------------------------------------------------------------------
 # MimicWXMessageEvent.send (text + image via event)
 # ---------------------------------------------------------------------------
-
-from astrbot.api.event import MessageChain
-from mimicwx_message_event import MimicWXMessageEvent  # noqa: E402
 
 
 def _make_event(session_id="wxid_alice", mock_client=None):
