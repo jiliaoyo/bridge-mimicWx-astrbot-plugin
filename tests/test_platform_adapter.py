@@ -234,6 +234,111 @@ class TestSendBySession:
 
 
 # ---------------------------------------------------------------------------
+# MimicWXMessageEvent.send (text + image via event)
+# ---------------------------------------------------------------------------
+
+from astrbot.api.event import MessageChain
+from mimicwx_message_event import MimicWXMessageEvent  # noqa: E402
+
+
+def _make_event(session_id="wxid_alice", mock_client=None):
+    """Create a MimicWXMessageEvent with a mocked client for testing."""
+    event_queue = asyncio.Queue()
+    adapter = MimicWXPlatformAdapter(VALID_CONFIG.copy(), {}, event_queue)
+    adapter.client_self_id = "wxid_bot"
+
+    raw = {
+        "local_id": 1,
+        "server_id": 100,
+        "create_time": 1700000000,
+        "content": "Hello",
+        "parsed": {"type": "Text", "data": {"text": "Hello"}},
+        "msg_type": 1,
+        "talker": "wxid_alice",
+        "talker_display_name": "Alice",
+        "chat": session_id,
+        "chat_display_name": "Alice",
+        "is_self": False,
+    }
+
+    # Dispatch to create the event
+    parser = adapter._parser
+    abm = parser.parse_to_abm(raw)
+    client = mock_client or AsyncMock()
+    event = MimicWXMessageEvent(
+        message_str=abm.message_str,
+        message_obj=abm,
+        platform_meta=adapter.meta(),
+        session_id=session_id,
+        client=client,
+    )
+    return event, client
+
+
+class TestEventSend:
+    @pytest.mark.asyncio
+    async def test_send_text_via_event(self):
+        """event.send() should call client.send_text with the correct session_id."""
+        mock_client = AsyncMock()
+        mock_client.send_text = AsyncMock(
+            return_value={"sent": True, "verified": True, "message": "ok"}
+        )
+        event, _ = _make_event(session_id="wxid_alice", mock_client=mock_client)
+
+        chain = MessageChain([Comp.Plain(text="Hello from event")])
+        await event.send(chain)
+
+        mock_client.send_text.assert_called_once_with(
+            to="wxid_alice", text="Hello from event"
+        )
+
+    @pytest.mark.asyncio
+    async def test_send_image_via_event(self):
+        """event.send() should call client.send_image for image segments."""
+        mock_client = AsyncMock()
+        mock_client.send_image = AsyncMock(
+            return_value={"sent": True, "verified": False, "message": "ok"}
+        )
+        event, _ = _make_event(session_id="wxid_alice", mock_client=mock_client)
+
+        img = Comp.Image(file="/tmp/test.png")
+        chain = MessageChain([img])
+
+        with patch.object(Comp.Image, "convert_to_base64", AsyncMock(return_value="aGVsbG8=")):
+            await event.send(chain)
+
+        assert mock_client.send_image.called
+
+    @pytest.mark.asyncio
+    async def test_send_uses_configured_host(self):
+        """event.send() should use the client passed at construction (not a default)."""
+        custom_client = AsyncMock()
+        custom_client.host = "mimicwx-linux"
+        custom_client.port = 8899
+        custom_client.send_text = AsyncMock(
+            return_value={"sent": True, "verified": True, "message": "ok"}
+        )
+        event, _ = _make_event(session_id="wxid_bob", mock_client=custom_client)
+
+        chain = MessageChain([Comp.Plain(text="Hi Bob")])
+        await event.send(chain)
+
+        custom_client.send_text.assert_called_once_with(to="wxid_bob", text="Hi Bob")
+
+    @pytest.mark.asyncio
+    async def test_send_empty_chain_does_nothing(self):
+        """event.send() with an empty chain should not call send_text or send_image."""
+        mock_client = AsyncMock()
+        event, _ = _make_event(mock_client=mock_client)
+
+        chain = MessageChain([])
+        await event.send(chain)
+
+        mock_client.send_text.assert_not_called()
+        mock_client.send_image.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # Adapter termination
 # ---------------------------------------------------------------------------
 
