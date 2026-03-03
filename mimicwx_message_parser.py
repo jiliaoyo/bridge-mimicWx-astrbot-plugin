@@ -185,9 +185,19 @@ class MimicWXMessageParser:
         abm.timestamp = int(raw.get("create_time", 0))
 
         talker = raw.get("talker", "")
-        talker_name = raw.get("talker_display_name", talker)
         chat = raw.get("chat", "")
-        chat_name = raw.get("chat_display_name", chat)
+        talker_display = raw.get("talker_display_name", "")
+        chat_display = raw.get("chat_display_name", "")
+
+        if is_group_chat(chat):
+            # Group chat: talker_display is the member's in-group nickname
+            talker_name = talker_display or talker
+            chat_name = chat_display or chat
+        else:
+            # Private chat: prefer talker_display, fall back to chat_display
+            # (contact display name from DB), then wxid
+            talker_name = talker_display or chat_display or talker
+            chat_name = chat_display or chat
 
         abm.sender = MessageMember(user_id=talker, nickname=talker_name)
 
