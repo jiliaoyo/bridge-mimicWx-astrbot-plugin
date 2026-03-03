@@ -362,6 +362,180 @@ class TestDisplayNameResolution:
 
 
 # ---------------------------------------------------------------------------
+# send_by_session: Plain text with None / empty text
+# ---------------------------------------------------------------------------
+
+
+class TestSendBySessionTextHandling:
+    @pytest.mark.asyncio
+    async def test_plain_empty_string_not_filtered(self):
+        """Comp.Plain with empty text must not be dropped (only None is filtered out)."""
+        event_queue = asyncio.Queue()
+        adapter = MimicWXPlatformAdapter(VALID_CONFIG.copy(), {}, event_queue)
+        mock_client = AsyncMock()
+        mock_client.send_text = AsyncMock(
+            return_value={"sent": True, "verified": True, "message": "ok"}
+        )
+        adapter.client = mock_client
+
+        session = _FakeSession(session_id="wxid_alice", message_type="FriendMessage")
+        # Empty string followed by real text: joined result is "hello".
+        chain = _FakeMessageChain([Comp.Plain(text=""), Comp.Plain(text="hello")])
+
+        await adapter.send_by_session(session, chain)
+        mock_client.send_text.assert_called_once_with(
+            to="wxid_alice", text="hello"
+        )
+
+    @pytest.mark.asyncio
+    async def test_non_plain_non_image_segment_ignored(self):
+        """Segments that are neither Comp.Plain nor Comp.Image must be ignored."""
+        event_queue = asyncio.Queue()
+        adapter = MimicWXPlatformAdapter(VALID_CONFIG.copy(), {}, event_queue)
+        mock_client = AsyncMock()
+        mock_client.send_text = AsyncMock(
+            return_value={"sent": True, "verified": True, "message": "ok"}
+        )
+        adapter.client = mock_client
+
+        # Simulate a Quote/unknown segment followed by a Plain segment.
+        class _FakeQuote:
+            pass
+
+        session = _FakeSession(session_id="wxid_alice", message_type="FriendMessage")
+        chain = _FakeMessageChain([_FakeQuote(), Comp.Plain(text="二次测试也完美通过！")])
+
+        await adapter.send_by_session(session, chain)
+        mock_client.send_text.assert_called_once_with(
+            to="wxid_alice", text="二次测试也完美通过！"
+        )
+
+
+# ---------------------------------------------------------------------------
+# _dispatch_message: chat_display_name preferred over sender.nickname
+# ---------------------------------------------------------------------------
+
+
+class TestDispatchMessageDisplayName:
+    @pytest.mark.asyncio
+    async def test_chat_display_name_preferred_over_nickname(self):
+        """chat_display_name should be used for caching when talker_display_name differs."""
+        event_queue = asyncio.Queue()
+        adapter = MimicWXPlatformAdapter(VALID_CONFIG.copy(), {}, event_queue)
+        adapter.client_self_id = "wxid_bot"
+
+        raw = {
+            "local_id": 20,
+            "server_id": 200,
+            "create_time": 1700000010,
+            "content": "Hi",
+            "parsed": {"type": "Text", "data": {"text": "Hi"}},
+            "msg_type": 1,
+            "talker": "wxid_carol",
+            # talker_display_name is absent / empty — as described in the issue
+            "talker_display_name": "",
+            "chat": "wxid_carol",
+            "chat_display_name": "Carol",
+            "is_self": False,
+        }
+        await adapter._dispatch_message(raw)
+        # chat_display_name "Carol" must win even though talker_display_name is empty
+        assert adapter._session_to_name.get("wxid_carol") == "Carol"
+
+    @pytest.mark.asyncio
+    async def test_fallback_to_nickname_when_chat_display_name_absent(self):
+        """sender.nickname is used when chat_display_name is missing."""
+        event_queue = asyncio.Queue()
+        adapter = MimicWXPlatformAdapter(VALID_CONFIG.copy(), {}, event_queue)
+        adapter.client_self_id = "wxid_bot"
+
+        raw = {
+            "local_id": 21,
+            "server_id": 201,
+            "create_time": 1700000011,
+            "content": "Hi",
+            "parsed": {"type": "Text", "data": {"text": "Hi"}},
+            "msg_type": 1,
+            "talker": "wxid_dave",
+            "talker_display_name": "Dave",
+            "chat": "wxid_dave",
+            # chat_display_name absent
+            "is_self": False,
+        }
+        await adapter._dispatch_message(raw)
+        assert adapter._session_to_name.get("wxid_dave") == "Dave"
+
+
+# ---------------------------------------------------------------------------
+# run(): contact preloading
+# ---------------------------------------------------------------------------
+
+
+class TestContactPreloading:
+    @pytest.mark.asyncio
+    async def test_preload_contacts_populates_session_to_name(self):
+        """run() should preload _session_to_name from GET /contacts."""
+        event_queue = asyncio.Queue()
+        adapter = MimicWXPlatformAdapter(VALID_CONFIG.copy(), {}, event_queue)
+
+        mock_client = AsyncMock()
+        mock_client.get_status = AsyncMock(
+            return_value={"status": "ok", "version": "1.0"}
+        )
+        mock_client.get_contacts = AsyncMock(
+            return_value={
+                "contacts": [
+                    {"username": "wxid_alice", "display_name": "Alice", "nick_name": "alice_nick"},
+                    {"username": "wxid_bob", "display_name": "", "nick_name": "Bob"},
+                    # display_name == username: should NOT be cached
+                    {"username": "wxid_raw", "display_name": "wxid_raw", "nick_name": ""},
+                ]
+            }
+        )
+        mock_client.ws_url = "ws://localhost:8899/ws"
+        mock_client.auth_headers = {}
+        adapter.client = mock_client
+
+        # Stop after preload by having _running turn False right away
+        async def fake_ws_loop():
+            adapter._running = False
+
+        adapter._ws_loop = fake_ws_loop
+
+        await adapter.run()
+
+        assert adapter._session_to_name.get("wxid_alice") == "Alice"
+        # display_name empty → fall back to nick_name
+        assert adapter._session_to_name.get("wxid_bob") == "Bob"
+        # display_name == username → not cached
+        assert "wxid_raw" not in adapter._session_to_name
+
+    @pytest.mark.asyncio
+    async def test_preload_contacts_failure_does_not_abort_run(self):
+        """A failure in GET /contacts must only log a warning, not stop the adapter."""
+        event_queue = asyncio.Queue()
+        adapter = MimicWXPlatformAdapter(VALID_CONFIG.copy(), {}, event_queue)
+
+        mock_client = AsyncMock()
+        mock_client.get_status = AsyncMock(
+            return_value={"status": "ok", "version": "1.0"}
+        )
+        mock_client.get_contacts = AsyncMock(side_effect=Exception("network error"))
+        mock_client.ws_url = "ws://localhost:8899/ws"
+        mock_client.auth_headers = {}
+        adapter.client = mock_client
+
+        async def fake_ws_loop():
+            adapter._running = False
+
+        adapter._ws_loop = fake_ws_loop
+
+        # Should complete without raising
+        await adapter.run()
+        assert adapter._session_to_name == {}
+
+
+# ---------------------------------------------------------------------------
 # Adapter termination
 # ---------------------------------------------------------------------------
 
