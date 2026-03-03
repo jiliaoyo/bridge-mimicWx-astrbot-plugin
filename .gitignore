@@ -7,6 +7,7 @@ __pycache__/
 # Pytest
 .pytest_cache/
 .coverage
+.idea/
 htmlcov/
 
 # AstrBot runtime data (generated at runtime — not for version control)

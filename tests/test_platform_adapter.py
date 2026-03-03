@@ -256,6 +256,30 @@ class TestSendBySession:
         mock_client.send_text.assert_called_once_with(to="wxid_alice", text="hello")
         mock_client.send_image.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_send_text_retries_once_when_unverified(self):
+        event_queue = asyncio.Queue()
+        adapter = MimicWXPlatformAdapter(VALID_CONFIG.copy(), {}, event_queue)
+        adapter.client_self_id = "wxid_bot"
+
+        mock_client = AsyncMock()
+        mock_client.send_text = AsyncMock(
+            side_effect=[
+                {"sent": True, "verified": False, "message": "ok"},
+                {"sent": True, "verified": True, "message": "ok"},
+            ]
+        )
+        mock_client.chat_with = AsyncMock(return_value={"success": True})
+        adapter.client = mock_client
+
+        session = _FakeSession(session_id="wxid_alice", message_type="FriendMessage")
+        chain = _FakeMessageChain([Comp.Plain(text="retry me")])
+
+        await adapter.send_by_session(session, chain)
+
+        assert mock_client.send_text.call_count == 2
+        mock_client.chat_with.assert_called_once_with(who="wxid_alice")
+
 
 # ---------------------------------------------------------------------------
 # MimicWXMessageEvent.send (text + image via event)
@@ -419,6 +443,24 @@ class TestDisplayNameResolution:
 
         mock_client.send_text.assert_called_once_with(to="wxid_alice", text="hello")
         mock_client.send_image.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_event_send_text_retries_once_when_unverified(self):
+        mock_client = AsyncMock()
+        mock_client.send_text = AsyncMock(
+            side_effect=[
+                {"sent": True, "verified": False, "message": "ok"},
+                {"sent": True, "verified": True, "message": "ok"},
+            ]
+        )
+        mock_client.chat_with = AsyncMock(return_value={"success": True})
+        event, _ = _make_event(session_id="wxid_alice", mock_client=mock_client)
+
+        chain = MessageChain([Comp.Plain(text="retry me too")])
+        await event.send(chain)
+
+        assert mock_client.send_text.call_count == 2
+        mock_client.chat_with.assert_called_once_with(who="wxid_alice")
 
     @pytest.mark.asyncio
     async def test_send_uses_configured_host(self):
@@ -628,6 +670,41 @@ class TestDispatchMessageDisplayName:
         }
         await adapter._dispatch_message(raw)
         assert adapter._session_to_name.get("wxid_eve") == "Eve Chat Alias"
+
+    @pytest.mark.asyncio
+    async def test_group_event_send_uses_group_display_name(self):
+        """event.send() should use cached group display name as recipient."""
+        event_queue = asyncio.Queue()
+        adapter = MimicWXPlatformAdapter(VALID_CONFIG.copy(), {}, event_queue)
+        adapter.client_self_id = "wxid_bot"
+
+        mock_client = AsyncMock()
+        mock_client.send_text = AsyncMock(
+            return_value={"sent": True, "verified": True, "message": "ok"}
+        )
+        adapter.client = mock_client
+
+        raw = {
+            "type": "db_message",
+            "local_id": 23,
+            "server_id": 203,
+            "create_time": 1700000013,
+            "content": "群里问好",
+            "parsed": {"type": "Text", "data": {"text": "群里问好"}},
+            "msg_type": 1,
+            "talker": "wxid_alice",
+            "talker_display": "Alice",
+            "chat": "49573410323@chatroom",
+            "chat_display": "资源专享",
+            "is_self": False,
+        }
+        await adapter._dispatch_message(raw)
+        event = await event_queue.get()
+
+        chain = MessageChain([Comp.Plain(text="收到")])
+        await event.send(chain)
+
+        mock_client.send_text.assert_called_once_with(to="资源专享", text="收到")
 
 
 # ---------------------------------------------------------------------------
