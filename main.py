@@ -24,7 +24,17 @@ The adapter will:
 
 from __future__ import annotations
 
+import os
+import sys
+
 from astrbot.api.star import Context, Star
+
+# Ensure the plugin directory is on sys.path so that sibling modules
+# (mimicwx_platform, mimicwx_client, …) can be found when AstrBot
+# loads the plugin via a dotted-path __import__.
+_plugin_dir = os.path.dirname(os.path.abspath(__file__))
+if _plugin_dir not in sys.path:
+    sys.path.append(_plugin_dir)
 
 # Importing the platform module causes the @register_platform_adapter
 # decorator to run, registering "mimicwx" in AstrBot's platform registry.
