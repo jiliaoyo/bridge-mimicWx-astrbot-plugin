@@ -303,6 +303,16 @@ class MimicWXPlatformAdapter(Platform):
             recipient,
         )
 
+        # Guard: if recipient is still a raw group-id (xxx@chatroom), do not send.
+        # MimicWX-Linux expects a visible contact/group name in WeChat UI.
+        if recipient.endswith("@chatroom"):
+            logger.warning(
+                "[MimicWX] 跳过发送：群名尚未解析，目标仍为 chatroom id (%s)",
+                recipient,
+            )
+            await super().send_by_session(session, message_chain)
+            return
+
         # Collect text segments and image segments separately.
         # Unsupported segments are ignored to avoid framework-level
         # error replies like "not a valid file" being sent to users.

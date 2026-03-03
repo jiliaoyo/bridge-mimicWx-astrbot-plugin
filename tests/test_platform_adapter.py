@@ -256,6 +256,44 @@ class TestSendBySession:
         mock_client.send_text.assert_called_once_with(to="wxid_alice", text="hello")
         mock_client.send_image.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_skip_send_when_recipient_is_raw_chatroom_id(self):
+        """If recipient is still xxx@chatroom, adapter must skip outbound send."""
+        event_queue = asyncio.Queue()
+        adapter = MimicWXPlatformAdapter(VALID_CONFIG.copy(), {}, event_queue)
+
+        mock_client = AsyncMock()
+        mock_client.send_text = AsyncMock(return_value={"sent": True})
+        mock_client.send_image = AsyncMock(return_value={"sent": True})
+        adapter.client = mock_client
+
+        session = _FakeSession(session_id="24654903245@chatroom", message_type="GroupMessage")
+        chain = _FakeMessageChain([Comp.Plain(text="hello group")])
+
+        await adapter.send_by_session(session, chain)
+
+        mock_client.send_text.assert_not_called()
+        mock_client.send_image.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_group_send_works_when_group_name_is_cached(self):
+        """If group display name is cached, outbound should send to that name."""
+        event_queue = asyncio.Queue()
+        adapter = MimicWXPlatformAdapter(VALID_CONFIG.copy(), {}, event_queue)
+
+        adapter._session_to_name["24654903245@chatroom"] = "资源专享"
+
+        mock_client = AsyncMock()
+        mock_client.send_text = AsyncMock(return_value={"sent": True})
+        adapter.client = mock_client
+
+        session = _FakeSession(session_id="24654903245@chatroom", message_type="GroupMessage")
+        chain = _FakeMessageChain([Comp.Plain(text="hello group")])
+
+        await adapter.send_by_session(session, chain)
+
+        mock_client.send_text.assert_called_once_with(to="资源专享", text="hello group")
+
 
 # ---------------------------------------------------------------------------
 # MimicWXMessageEvent.send (text + image via event)
