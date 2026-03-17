@@ -45,7 +45,7 @@ class MimicWXMessageEvent(AstrMessageEvent):
 
         for seg in message.chain:
             if isinstance(seg, Comp.Plain):
-                if seg.text.strip():
+                if seg.text is not None:
                     text_parts.append(seg.text)
             elif isinstance(seg, Comp.Image):
                 image_segments.append(seg)

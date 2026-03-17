@@ -279,6 +279,47 @@ class MimicWXPlatformAdapter(Platform):
             recipient=self._session_to_name.get(session_id, session_id),
         )
         self.commit_event(event)
+
+        # 将群聊消息存入 AstrBot 的 platform_message_history 数据库
+        # 供群分析插件的 GenericAdapter 读取历史消息
+        if abm.group:
+            try:
+                from astrbot.core import db_helper
+
+                # 构建与 webchat_adapter 兼容的消息内容格式
+                msg_parts = []
+                for seg in (abm.message or []):
+                    seg_type = getattr(seg, "type", None)
+                    if seg_type and hasattr(seg_type, "value"):
+                        seg_type = seg_type.value  # enum → str
+                    if seg_type == "text" or seg_type == "plain":
+                        msg_parts.append({
+                            "type": "plain",
+                            "text": getattr(seg, "text", "") or "",
+                        })
+                    elif seg_type == "image":
+                        msg_parts.append({
+                            "type": "image",
+                            "url": getattr(seg, "url", "") or "",
+                        })
+                    elif seg_type == "at":
+                        msg_parts.append({
+                            "type": "at",
+                            "target_id": getattr(seg, "qq", "") or "",
+                        })
+                if not msg_parts and abm.message_str:
+                    msg_parts.append({"type": "plain", "text": abm.message_str})
+
+                await db_helper.insert_platform_message_history(
+                    platform_id=platform_meta.id,
+                    user_id=session_id,
+                    content={"message": msg_parts},
+                    sender_id=abm.sender.user_id,
+                    sender_name=abm.sender.nickname or abm.sender.user_id,
+                )
+            except Exception as e:
+                logger.debug("[MimicWX] 消息存储失败 (不影响正常功能): %s", e)
+
         logger.debug(
             "[MimicWX] 提交事件: sender=%s chat=%s text=%.60s",
             abm.sender.user_id,
