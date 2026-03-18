@@ -14,7 +14,36 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from mimicwx_client import MimicWXClient, MimicWXClientError
+from mimicwx_client import MimicWXClient, MimicWXClientError, strip_base64_prefix
+
+
+# ---------------------------------------------------------------------------
+# strip_base64_prefix unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestStripBase64Prefix:
+    def test_pure_base64_unchanged(self):
+        assert strip_base64_prefix("aGVsbG8=") == "aGVsbG8="
+
+    def test_strip_data_uri_png(self):
+        assert strip_base64_prefix("data:image/png;base64,aGVsbG8=") == "aGVsbG8="
+
+    def test_strip_data_uri_jpeg(self):
+        assert strip_base64_prefix("data:image/jpeg;base64,aGVsbG8=") == "aGVsbG8="
+
+    def test_strip_data_uri_case_insensitive(self):
+        assert strip_base64_prefix("Data:Image/PNG;Base64,aGVsbG8=") == "aGVsbG8="
+
+    def test_strip_base64_protocol(self):
+        assert strip_base64_prefix("base64://aGVsbG8=") == "aGVsbG8="
+
+    def test_empty_string(self):
+        assert strip_base64_prefix("") == ""
+
+    def test_non_prefixed_data(self):
+        raw = "iVBORw0KGgoAAAANSUhEUgAA"
+        assert strip_base64_prefix(raw) == raw
 
 
 # ---------------------------------------------------------------------------
@@ -161,6 +190,45 @@ class TestSendImage:
         client = MimicWXClient(host="localhost")
         with pytest.raises(ValueError, match="image"):
             await client.send_image(to="Bob", image_b64="")
+
+    @pytest.mark.asyncio
+    async def test_send_image_strips_data_uri_prefix(self):
+        """send_image must strip data:image/...;base64, before POSTing."""
+        payload = {"sent": True, "verified": False, "message": "ok"}
+        client = MimicWXClient(host="localhost")
+        captured_payloads = []
+
+        async def _capture_post(path, payload):
+            captured_payloads.append(payload)
+            return {"sent": True, "verified": False, "message": "ok"}
+
+        client._post = _capture_post
+        await client.send_image(
+            to="Bob",
+            image_b64="data:image/png;base64,aGVsbG8=",
+            name="test.png",
+        )
+        assert len(captured_payloads) == 1
+        assert captured_payloads[0]["file"] == "aGVsbG8="
+
+    @pytest.mark.asyncio
+    async def test_send_image_strips_base64_protocol_prefix(self):
+        """send_image must strip base64:// before POSTing."""
+        client = MimicWXClient(host="localhost")
+        captured_payloads = []
+
+        async def _capture_post(path, payload):
+            captured_payloads.append(payload)
+            return {"sent": True, "verified": False, "message": "ok"}
+
+        client._post = _capture_post
+        await client.send_image(
+            to="Bob",
+            image_b64="base64://aGVsbG8=",
+            name="test.png",
+        )
+        assert len(captured_payloads) == 1
+        assert captured_payloads[0]["file"] == "aGVsbG8="
 
 
 # ---------------------------------------------------------------------------

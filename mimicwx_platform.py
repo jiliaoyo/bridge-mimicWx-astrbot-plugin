@@ -44,7 +44,7 @@ from astrbot.api.platform import (
     register_platform_adapter,
 )
 
-from mimicwx_client import MimicWXClient, MimicWXClientError
+from mimicwx_client import MimicWXClient, MimicWXClientError, strip_base64_prefix
 from mimicwx_message_event import MimicWXMessageEvent
 from mimicwx_message_parser import MimicWXMessageParser
 
@@ -387,6 +387,7 @@ class MimicWXPlatformAdapter(Platform):
         for img in image_segments:
             try:
                 b64 = await img.convert_to_base64()
+                b64 = strip_base64_prefix(b64)
                 filename = getattr(img, "file", None) or "image.png"
                 # Only use the basename for the filename hint
                 if filename and "/" in filename:

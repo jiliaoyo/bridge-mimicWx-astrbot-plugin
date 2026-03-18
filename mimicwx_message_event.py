@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 import astrbot.api.message_components as Comp
 from astrbot.api.event import AstrMessageEvent, MessageChain
 
-from mimicwx_client import MimicWXClientError
+from mimicwx_client import MimicWXClientError, strip_base64_prefix
 
 if TYPE_CHECKING:
     from mimicwx_client import MimicWXClient
@@ -67,6 +67,7 @@ class MimicWXMessageEvent(AstrMessageEvent):
         for img in image_segments:
             try:
                 b64 = await img.convert_to_base64()
+                b64 = strip_base64_prefix(b64)
                 filename = getattr(img, "file", None) or "image.png"
                 if filename and "/" in filename:
                     filename = filename.rsplit("/", 1)[-1]

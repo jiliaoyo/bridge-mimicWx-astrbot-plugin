@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import Any
 
 import aiohttp
@@ -18,6 +19,27 @@ logger = logging.getLogger("astrbot")
 
 class MimicWXClientError(Exception):
     """Raised when the MimicWX server returns an error or is unreachable."""
+
+
+# Matches data-URI prefixes like "data:image/png;base64,"
+_DATA_URI_RE = re.compile(r"^data:[^;]+;base64,", re.IGNORECASE)
+
+
+def strip_base64_prefix(data: str) -> str:
+    """Remove any base64 transport prefix, returning raw base64 data.
+
+    Handles:
+    - ``data:image/png;base64,<data>``
+    - ``base64://<data>``
+    - Already-clean base64 (returned unchanged)
+    """
+    if not data:
+        return data
+    # Strip data-URI prefix (e.g. "data:image/jpeg;base64,")
+    data = _DATA_URI_RE.sub("", data)
+    # Strip base64:// prefix
+    data = data.removeprefix("base64://")
+    return data
 
 
 class MimicWXClient:
@@ -184,7 +206,9 @@ class MimicWXClient:
             raise ValueError("recipient 'to' must not be empty")
         if not image_b64:
             raise ValueError("image data must not be empty")
-        return await self._post("/send_image", {"to": to, "file": image_b64, "name": name})
+        # Ensure raw base64 without any data-URI or base64:// prefix
+        clean_b64 = strip_base64_prefix(image_b64)
+        return await self._post("/send_image", {"to": to, "file": clean_b64, "name": name})
 
     async def add_listen(self, who: str) -> dict[str, Any]:
         """POST /listen — 添加独立聊天窗口监听。
