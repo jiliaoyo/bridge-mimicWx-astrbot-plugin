@@ -392,12 +392,22 @@ class MimicWXPlatformAdapter(Platform):
                 # Only use the basename for the filename hint
                 if filename and "/" in filename:
                     filename = filename.rsplit("/", 1)[-1]
-                await self.client.send_image(
+                logger.info(
+                    "[MimicWX] 正在发送图片 → %s (大小: %.1fKB, 文件名: %s)",
+                    recipient, len(b64) / 1024, filename,
+                )
+                result = await self.client.send_image(
                     to=recipient,
                     image_b64=b64,
                     name=filename or "image.png",
                 )
-                logger.debug("[MimicWX] 图片已发送 → %s", recipient)
+                sent = result.get("sent", False)
+                verified = result.get("verified", False)
+                msg = result.get("message", "")
+                logger.info(
+                    "[MimicWX] 图片发送结果 → %s: sent=%s verified=%s msg=%s",
+                    recipient, sent, verified, msg,
+                )
             except (MimicWXClientError, ValueError) as exc:
                 logger.error("[MimicWX] 发送图片失败 → %s: %s", recipient, exc)
 
